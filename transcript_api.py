@@ -475,8 +475,8 @@ def create_app():
 
         if not urls:
             return jsonify({"error": "Missing 'urls' field"}), 400
-        if len(urls) > 2000:
-            return jsonify({"error": "Max 2000 URLs per request"}), 400
+        if len(urls) > 50:
+            return jsonify({"error": "Max 50 URLs per request. Use n8n loop to send batches of 10-20"}), 400
 
         results = []
         for url in urls:
@@ -498,7 +498,6 @@ def create_app():
                     "line_count": len(lines),
                     "transcript": '\n'.join(lines), "lines": lines
                 })
-            time.sleep(2)
 
         return jsonify({"count": len(results), "results": results})
 
