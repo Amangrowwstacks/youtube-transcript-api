@@ -475,8 +475,8 @@ def create_app():
 
         if not urls:
             return jsonify({"error": "Missing 'urls' field"}), 400
-        if len(urls) > 100:
-            return jsonify({"error": "Max 100 URLs per request"}), 400
+        if len(urls) > 2000:
+            return jsonify({"error": "Max 2000 URLs per request"}), 400
 
         results = []
         for url in urls:
