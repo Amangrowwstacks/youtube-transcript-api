@@ -1,0 +1,6 @@
+flask
+requests
+PySocks
+yt-dlp
+curl_cffi
+gunicorn
