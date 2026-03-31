@@ -470,34 +470,42 @@ def create_app():
 
     @app.route('/transcript/bulk', methods=['POST'])
     def transcript_bulk():
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         data = flask_request.get_json(force=True)
         urls = data.get('urls', [])
 
         if not urls:
             return jsonify({"error": "Missing 'urls' field"}), 400
-        if len(urls) > 50:
-            return jsonify({"error": "Max 50 URLs per request. Use n8n loop to send batches of 10-20"}), 400
+        if len(urls) > 200:
+            return jsonify({"error": "Max 200 URLs per request"}), 400
 
-        results = []
-        for url in urls:
+        def process_one(url):
             video_id = get_video_id(url)
             if not video_id:
-                results.append({"url": url, "error": "Invalid URL"})
-                continue
+                return {"url": url, "error": "Invalid URL"}
             try:
                 lines, lang, error = fetch_transcript(video_id, url)
             except Exception as e:
-                results.append({"url": url, "video_id": video_id, "error": str(e)})
-                continue
+                return {"url": url, "video_id": video_id, "error": str(e)}
 
             if lines is None:
-                results.append({"url": url, "video_id": video_id, "error": error})
-            else:
-                results.append({
-                    "video_id": video_id, "url": url, "language": lang,
-                    "line_count": len(lines),
-                    "transcript": '\n'.join(lines), "lines": lines
-                })
+                return {"url": url, "video_id": video_id, "error": error}
+            return {
+                "video_id": video_id, "url": url, "language": lang,
+                "line_count": len(lines),
+                "transcript": '\n'.join(lines), "lines": lines
+            }
+
+        results = [None] * len(urls)
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            future_to_idx = {executor.submit(process_one, url): i for i, url in enumerate(urls)}
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as e:
+                    results[idx] = {"url": urls[idx], "error": str(e)}
 
         return jsonify({"count": len(results), "results": results})
 
