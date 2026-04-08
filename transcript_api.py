@@ -548,6 +548,9 @@ def fetch_transcript(video_id, url):
             lang = lang_match.group(1) if lang_match else 'unknown'
             return lines_part[1].strip().split('\n'), lang, None
 
+    # Rotate Tor IP before every new fetch to avoid blocks
+    rotate_tor_ip()
+
     # Method 1: Fast (youtube-transcript-api library)
     lines, lang, fast_error = fetch_transcript_fast(video_id)
 
@@ -682,15 +685,9 @@ def create_app():
                 "transcript": '\n'.join(lines), "lines": lines
             }
 
-        results = [None] * len(urls)
-        with ThreadPoolExecutor(max_workers=6) as executor:
-            future_to_idx = {executor.submit(process_one, url): i for i, url in enumerate(urls)}
-            for future in as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                try:
-                    results[idx] = future.result()
-                except Exception as e:
-                    results[idx] = {"url": urls[idx], "error": str(e)}
+        results = []
+        for url in urls:
+            results.append(process_one(url))
 
         return jsonify({"count": len(results), "results": results})
 
