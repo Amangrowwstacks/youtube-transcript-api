@@ -19,7 +19,7 @@ COPY cookies.txt* ./
 COPY start.sh .
 RUN chmod +x start.sh
 
-# Expose port
+# Expose port (Railway assigns PORT dynamically)
 EXPOSE 5055
 
 # Start Tor + API server
