@@ -43,6 +43,8 @@ HEADERS = {
 
 request_count = 0
 REQUEST_LIMIT = 8
+COOKIE_REFRESH_INTERVAL = 6 * 3600  # 6 hours
+last_cookie_refresh = 0
 
 # ============================================================
 #  AUTO SETUP - runs once on first launch
@@ -296,6 +298,39 @@ def rotate_tor_ip():
     return False
 
 
+def refresh_cookies():
+    """Use yt-dlp to refresh YouTube cookies automatically."""
+    global last_cookie_refresh
+    now = time.time()
+    if now - last_cookie_refresh < COOKIE_REFRESH_INTERVAL:
+        return
+
+    print("[COOKIES] Refreshing cookies via yt-dlp...")
+    backup = None
+    if os.path.exists(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 100:
+        with open(COOKIE_FILE, 'r') as f:
+            backup = f.read()
+
+    try:
+        cmd = [sys.executable, '-m', 'yt_dlp',
+               '--cookies', COOKIE_FILE,
+               '--cookies-from-browser', 'chrome',
+               '--skip-download', '--no-warnings',
+               'https://www.youtube.com/watch?v=jNQXAC9IVRw']
+        subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except Exception:
+        pass
+
+    # If cookie file got wiped or is too small, restore backup
+    if backup and (not os.path.exists(COOKIE_FILE) or os.path.getsize(COOKIE_FILE) < 100):
+        with open(COOKIE_FILE, 'w') as f:
+            f.write(backup)
+        print("[COOKIES] Refresh failed, restored backup")
+    else:
+        last_cookie_refresh = now
+        print("[COOKIES] Cookies refreshed")
+
+
 def get_video_id(url):
     match = re.search(r'v=([A-Za-z0-9_-]{11})', url)
     if match:
@@ -332,6 +367,7 @@ def get_subtitle_urls(video_id, url):
                 result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=30)
 
             if result.returncode != 0:
+                print(f"[YT-DLP] Failed (proxy={bool(proxy)}): {result.stderr[:200]}")
                 continue
 
             data = json.loads(result.stdout)
@@ -382,6 +418,9 @@ def fetch_transcript(video_id, url):
             lang_match = re.search(r'Language: (\w+)', content)
             lang = lang_match.group(1) if lang_match else 'unknown'
             return lines_part[1].strip().split('\n'), lang, None
+
+    # Refresh cookies if needed
+    refresh_cookies()
 
     # Auto rotate IP
     request_count += 1
