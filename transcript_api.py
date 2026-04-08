@@ -309,37 +309,48 @@ def get_video_id(url):
 def get_subtitle_urls(video_id, url):
     """Use yt-dlp to get signed subtitle URLs."""
     cmd = ['yt-dlp', '--dump-json', '-f', 'sb0', '--no-warnings']
-    if os.path.exists(COOKIE_FILE):
+    if os.path.exists(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 100:
         cmd += ['--cookies', COOKIE_FILE]
     try:
         cmd += ['--impersonate', 'chrome']
     except Exception:
         pass
-    cmd.append(url)
 
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    except FileNotFoundError:
-        # yt-dlp not in PATH, try via python module
-        cmd[0:1] = [sys.executable, '-m', 'yt_dlp']
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    # Try with proxy first, then without
+    proxy_opts = []
+    if is_tor_running():
+        proxy_opts.append(['--proxy', 'socks5://127.0.0.1:9050'])
+    proxy_opts.append([])  # no proxy fallback
 
-    if result.returncode != 0:
-        return []
+    for proxy in proxy_opts:
+        full_cmd = cmd + proxy + [url]
+        try:
+            try:
+                result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=30)
+            except FileNotFoundError:
+                full_cmd[0:1] = [sys.executable, '-m', 'yt_dlp']
+                result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=30)
 
-    data = json.loads(result.stdout)
-    auto_subs = data.get('automatic_captions', {})
-    manual_subs = data.get('subtitles', {})
+            if result.returncode != 0:
+                continue
 
-    urls = []
-    for subs_dict in [manual_subs, auto_subs]:
-        for lang in ['hi', 'en']:
-            if lang in subs_dict:
-                for fmt in subs_dict[lang]:
-                    if fmt['ext'] == 'json3':
-                        urls.append((fmt['url'], lang))
-                        break
-    return urls
+            data = json.loads(result.stdout)
+            auto_subs = data.get('automatic_captions', {})
+            manual_subs = data.get('subtitles', {})
+
+            urls = []
+            for subs_dict in [manual_subs, auto_subs]:
+                for lang in ['hi', 'en']:
+                    if lang in subs_dict:
+                        for fmt in subs_dict[lang]:
+                            if fmt['ext'] == 'json3':
+                                urls.append((fmt['url'], lang))
+                                break
+            if urls:
+                return urls
+        except Exception:
+            continue
+    return []
 
 
 def parse_json3(text):
@@ -386,28 +397,27 @@ def fetch_transcript(video_id, url):
             return None, None, "No subtitle URLs found"
 
         for sub_url, lang in sub_urls:
-            try:
-                r = req_lib.get(sub_url, proxies=TOR_PROXIES, headers=HEADERS, timeout=30)
-                if r.status_code == 200 and len(r.text) > 50:
-                    lines = parse_json3(r.text)
-                    if lines:
-                        with open(cache_file, 'w', encoding='utf-8') as f:
-                            f.write(f"Video: {url}\nLanguage: {lang}\n{'='*60}\n\n")
-                            f.write('\n'.join(lines))
-                        return lines, lang, None
-                elif r.status_code == 429:
-                    rotate_tor_ip()
-                    # Retry same URL with new IP
-                    r2 = req_lib.get(sub_url, proxies=TOR_PROXIES, headers=HEADERS, timeout=30)
-                    if r2.status_code == 200 and len(r2.text) > 50:
-                        lines = parse_json3(r2.text)
+            # Try with Tor first, then direct
+            proxy_options = []
+            if is_tor_running():
+                proxy_options.append(TOR_PROXIES)
+            proxy_options.append(None)  # direct fallback
+
+            for proxy in proxy_options:
+                try:
+                    r = req_lib.get(sub_url, proxies=proxy, headers=HEADERS, timeout=30)
+                    if r.status_code == 200 and len(r.text) > 50:
+                        lines = parse_json3(r.text)
                         if lines:
                             with open(cache_file, 'w', encoding='utf-8') as f:
                                 f.write(f"Video: {url}\nLanguage: {lang}\n{'='*60}\n\n")
                                 f.write('\n'.join(lines))
                             return lines, lang, None
-            except Exception:
-                continue
+                    elif r.status_code == 429 and proxy == TOR_PROXIES:
+                        rotate_tor_ip()
+                        continue
+                except Exception:
+                    continue
 
         # All URLs failed, rotate IP and get fresh URLs
         rotate_tor_ip()
