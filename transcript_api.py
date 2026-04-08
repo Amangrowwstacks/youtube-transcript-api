@@ -44,6 +44,12 @@ HEADERS = {
 request_count = 0
 REQUEST_LIMIT = 5  # Rotate Tor IP every 5 requests to avoid blocks
 
+# Retry queue for failed transcripts
+retry_queue = {}  # {video_id: {"url": url, "retries": 0, "next_retry": timestamp}}
+RETRY_MAX = 3
+RETRY_DELAY = 600  # 10 minutes between retries
+retry_lock = threading.Lock()
+
 # ============================================================
 #  AUTO SETUP - runs once on first launch
 # ============================================================
@@ -559,7 +565,8 @@ def fetch_transcript(video_id, url):
         print(f"[FETCH] Fast method failed for {video_id}, trying yt-dlp...")
         lines, lang, ytdlp_error = fetch_transcript_ytdlp(video_id, url)
         if lines is None:
-            return None, None, f"Fast: {fast_error} | YT-DLP: {ytdlp_error}"
+            add_to_retry(video_id, url)
+            return None, None, f"Fast: {fast_error} | YT-DLP: {ytdlp_error} | Added to retry queue"
 
     # Cache result
     with open(cache_file, 'w', encoding='utf-8') as f:
@@ -567,6 +574,68 @@ def fetch_transcript(video_id, url):
         f.write('\n'.join(lines))
 
     return lines, lang, None
+
+
+# ============================================================
+#  RETRY QUEUE SYSTEM
+# ============================================================
+
+def add_to_retry(video_id, url):
+    """Add failed video to retry queue."""
+    with retry_lock:
+        if video_id not in retry_queue and video_id:
+            retry_queue[video_id] = {
+                "url": url,
+                "retries": 0,
+                "next_retry": time.time() + RETRY_DELAY
+            }
+            print(f"[RETRY] Queued {video_id} (queue size: {len(retry_queue)})")
+
+
+def retry_worker():
+    """Background thread that retries failed transcripts."""
+    while True:
+        time.sleep(60)  # Check every minute
+        now = time.time()
+        to_retry = []
+
+        with retry_lock:
+            for vid, info in list(retry_queue.items()):
+                if now >= info["next_retry"]:
+                    to_retry.append((vid, info))
+
+        for vid, info in to_retry:
+            url = info["url"]
+            print(f"[RETRY] Retrying {vid} (attempt {info['retries']+1}/{RETRY_MAX})")
+
+            rotate_tor_ip()
+            time.sleep(2)
+
+            lines, lang, error = fetch_transcript_fast(vid)
+            if lines:
+                # Save to cache
+                cache_file = os.path.join(CACHE_DIR, f"{vid}.txt")
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    f.write(f"Video: {url}\nLanguage: {lang}\n{'='*60}\n\n")
+                    f.write('\n'.join(lines))
+                with retry_lock:
+                    retry_queue.pop(vid, None)
+                print(f"[RETRY] SUCCESS {vid} - {len(lines)} lines")
+            else:
+                with retry_lock:
+                    if vid in retry_queue:
+                        retry_queue[vid]["retries"] += 1
+                        if retry_queue[vid]["retries"] >= RETRY_MAX:
+                            retry_queue.pop(vid, None)
+                            print(f"[RETRY] GAVE UP on {vid} after {RETRY_MAX} attempts")
+                        else:
+                            retry_queue[vid]["next_retry"] = time.time() + RETRY_DELAY
+                            print(f"[RETRY] Failed {vid}, will retry in {RETRY_DELAY}s")
+
+
+# Start retry worker thread
+_retry_thread = threading.Thread(target=retry_worker, daemon=True)
+_retry_thread.start()
 
 
 # ============================================================
@@ -611,6 +680,17 @@ def create_app():
             info["test_error"] = str(e)[:500]
 
         return jsonify(info)
+
+    @app.route('/retry-status', methods=['GET'])
+    def retry_status():
+        with retry_lock:
+            queue_info = {vid: {"retries": info["retries"], "next_retry_in": max(0, int(info["next_retry"] - time.time()))}
+                         for vid, info in retry_queue.items()}
+        return jsonify({
+            "queue_size": len(queue_info),
+            "cached_transcripts": len(os.listdir(CACHE_DIR)),
+            "queue": queue_info
+        })
 
     @app.route('/health', methods=['GET'])
     def health():
