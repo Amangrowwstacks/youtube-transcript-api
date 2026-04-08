@@ -413,11 +413,80 @@ def parse_json3(text):
     return lines
 
 
-def fetch_transcript(video_id, url):
-    """Get transcript via yt-dlp + Tor with auto IP rotation."""
+def fetch_transcript_fast(video_id):
+    """Fast method: use youtube-transcript-api library directly."""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        api = YouTubeTranscriptApi()
+
+        # Try preferred languages first
+        for langs in [['hi', 'en'], None]:
+            try:
+                if langs:
+                    t = api.fetch(video_id, languages=langs)
+                else:
+                    # Get any available transcript
+                    tl = api.list(video_id)
+                    t = None
+                    for tr in tl:
+                        t = tr.fetch()
+                        break
+                    if t is None:
+                        continue
+
+                lines = [s.text.strip().replace('\n', ' ') for s in t.snippets if s.text.strip()]
+                if lines:
+                    lang = t.language_code if hasattr(t, 'language_code') else 'unknown'
+                    print(f"[FAST] Got {len(lines)} lines for {video_id} (lang={lang})")
+                    return lines, lang, None
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"[FAST] Failed for {video_id}: {e}")
+    return None, None, None
+
+
+def fetch_transcript_ytdlp(video_id, url):
+    """Fallback method: use yt-dlp + Tor."""
     global request_count
     import requests as req_lib
 
+    request_count += 1
+    if request_count >= REQUEST_LIMIT:
+        rotate_tor_ip()
+
+    for big_attempt in range(2):
+        sub_urls = get_subtitle_urls(video_id, url)
+        if not sub_urls:
+            if big_attempt < 1:
+                rotate_tor_ip()
+                continue
+            return None, None, "No subtitle URLs found (yt-dlp)"
+
+        for sub_url, lang in sub_urls:
+            proxy_options = []
+            if is_tor_running():
+                proxy_options.append(TOR_PROXIES)
+            proxy_options.append(None)
+
+            for proxy in proxy_options:
+                try:
+                    r = req_lib.get(sub_url, proxies=proxy, headers=HEADERS, timeout=30)
+                    if r.status_code == 200 and len(r.text) > 50:
+                        lines = parse_json3(r.text)
+                        if lines:
+                            return lines, lang, None
+                    elif r.status_code == 429 and proxy == TOR_PROXIES:
+                        rotate_tor_ip()
+                except Exception:
+                    continue
+        rotate_tor_ip()
+
+    return None, None, "Failed to download subtitles"
+
+
+def fetch_transcript(video_id, url):
+    """Get transcript - fast method first, yt-dlp fallback."""
     # Check cache
     cache_file = os.path.join(CACHE_DIR, f"{video_id}.txt")
     if os.path.exists(cache_file) and os.path.getsize(cache_file) > 100:
@@ -429,49 +498,22 @@ def fetch_transcript(video_id, url):
             lang = lang_match.group(1) if lang_match else 'unknown'
             return lines_part[1].strip().split('\n'), lang, None
 
-    # Refresh cookies if needed
-    refresh_cookies()
+    # Method 1: Fast (youtube-transcript-api library)
+    lines, lang, _ = fetch_transcript_fast(video_id)
 
-    # Auto rotate IP
-    request_count += 1
-    if request_count >= REQUEST_LIMIT:
-        rotate_tor_ip()
+    # Method 2: Fallback (yt-dlp)
+    if lines is None:
+        print(f"[FETCH] Fast method failed for {video_id}, trying yt-dlp...")
+        lines, lang, error = fetch_transcript_ytdlp(video_id, url)
+        if lines is None:
+            return None, None, error
 
-    for big_attempt in range(3):
-        sub_urls = get_subtitle_urls(video_id, url)
-        if not sub_urls:
-            if big_attempt < 2:
-                rotate_tor_ip()
-                continue
-            return None, None, "No subtitle URLs found"
+    # Cache result
+    with open(cache_file, 'w', encoding='utf-8') as f:
+        f.write(f"Video: {url}\nLanguage: {lang}\n{'='*60}\n\n")
+        f.write('\n'.join(lines))
 
-        for sub_url, lang in sub_urls:
-            # Try with Tor first, then direct
-            proxy_options = []
-            if is_tor_running():
-                proxy_options.append(TOR_PROXIES)
-            proxy_options.append(None)  # direct fallback
-
-            for proxy in proxy_options:
-                try:
-                    r = req_lib.get(sub_url, proxies=proxy, headers=HEADERS, timeout=30)
-                    if r.status_code == 200 and len(r.text) > 50:
-                        lines = parse_json3(r.text)
-                        if lines:
-                            with open(cache_file, 'w', encoding='utf-8') as f:
-                                f.write(f"Video: {url}\nLanguage: {lang}\n{'='*60}\n\n")
-                                f.write('\n'.join(lines))
-                            return lines, lang, None
-                    elif r.status_code == 429 and proxy == TOR_PROXIES:
-                        rotate_tor_ip()
-                        continue
-                except Exception:
-                    continue
-
-        # All URLs failed, rotate IP and get fresh URLs
-        rotate_tor_ip()
-
-    return None, None, "Failed to download subtitles"
+    return lines, lang, None
 
 
 # ============================================================

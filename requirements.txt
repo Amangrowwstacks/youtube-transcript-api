@@ -4,3 +4,4 @@ PySocks
 yt-dlp[default]
 curl_cffi
 gunicorn
+youtube-transcript-api
