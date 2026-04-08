@@ -43,8 +43,6 @@ HEADERS = {
 
 request_count = 0
 REQUEST_LIMIT = 8
-COOKIE_REFRESH_INTERVAL = 6 * 3600  # 6 hours
-last_cookie_refresh = 0
 
 # ============================================================
 #  AUTO SETUP - runs once on first launch
@@ -298,37 +296,6 @@ def rotate_tor_ip():
     return False
 
 
-def refresh_cookies():
-    """Use yt-dlp to refresh YouTube cookies automatically."""
-    global last_cookie_refresh
-    now = time.time()
-    if now - last_cookie_refresh < COOKIE_REFRESH_INTERVAL:
-        return
-
-    print("[COOKIES] Refreshing cookies via yt-dlp...")
-    backup = None
-    if os.path.exists(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 100:
-        with open(COOKIE_FILE, 'r') as f:
-            backup = f.read()
-
-    try:
-        cmd = [sys.executable, '-m', 'yt_dlp',
-               '--cookies', COOKIE_FILE,
-               '--cookies-from-browser', 'chrome',
-               '--skip-download', '--no-warnings',
-               'https://www.youtube.com/watch?v=jNQXAC9IVRw']
-        subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    except Exception:
-        pass
-
-    # If cookie file got wiped or is too small, restore backup
-    if backup and (not os.path.exists(COOKIE_FILE) or os.path.getsize(COOKIE_FILE) < 100):
-        with open(COOKIE_FILE, 'w') as f:
-            f.write(backup)
-        print("[COOKIES] Refresh failed, restored backup")
-    else:
-        last_cookie_refresh = now
-        print("[COOKIES] Cookies refreshed")
 
 
 def get_video_id(url):
@@ -429,6 +396,25 @@ def _load_cookies_to_session(session):
     print(f"[COOKIES] Loaded {len(session.cookies)} cookies into session")
 
 
+def _save_cookies_from_session(session):
+    """Save updated cookies from session back to cookies.txt."""
+    try:
+        if not session.cookies:
+            return
+        output = '# Netscape HTTP Cookie File\n'
+        for cookie in session.cookies:
+            secure = 'TRUE' if cookie.secure else 'FALSE'
+            domain_dot = 'TRUE' if cookie.domain.startswith('.') else 'FALSE'
+            expires = str(cookie.expires) if cookie.expires else str(int(time.time()) + 86400 * 365)
+            output += f'{cookie.domain}\t{domain_dot}\t{cookie.path}\t{secure}\t{expires}\t{cookie.name}\t{cookie.value}\n'
+        if len(output) > 100:
+            with open(COOKIE_FILE, 'w') as f:
+                f.write(output)
+            print(f"[COOKIES] Auto-saved {len(session.cookies)} cookies (refreshed)")
+    except Exception as e:
+        print(f"[COOKIES] Save failed: {e}")
+
+
 def _get_transcript_api():
     """Get YouTubeTranscriptApi with cookies loaded."""
     from youtube_transcript_api import YouTubeTranscriptApi
@@ -437,13 +423,13 @@ def _get_transcript_api():
     session = req_lib.Session()
     _load_cookies_to_session(session)
 
-    return YouTubeTranscriptApi(http_client=session)
+    return YouTubeTranscriptApi(http_client=session), session
 
 
 def fetch_transcript_fast(video_id):
     """Fast method: use youtube-transcript-api library with cookies."""
     try:
-        api = _get_transcript_api()
+        api, session = _get_transcript_api()
 
         # Try preferred languages first, then any available
         for langs in [['hi', 'en'], None]:
@@ -463,6 +449,8 @@ def fetch_transcript_fast(video_id):
                 if lines:
                     lang = t.language_code if hasattr(t, 'language_code') else 'unknown'
                     print(f"[FAST] Got {len(lines)} lines for {video_id} (lang={lang})")
+                    # Auto-refresh cookies after successful fetch
+                    _save_cookies_from_session(session)
                     return lines, lang, None
             except Exception as e:
                 print(f"[FAST] Attempt (langs={langs}): {e}")
@@ -577,7 +565,7 @@ def create_app():
 
         # Try fetching transcript
         try:
-            api = _get_transcript_api()
+            api, _ = _get_transcript_api()
             t = api.fetch('dQw4w9WgXcQ', languages=['en'])
             info["test_result"] = f"OK - {len(t.snippets)} lines"
         except Exception as e:
