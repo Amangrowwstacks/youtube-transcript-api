@@ -453,11 +453,11 @@ def fetch_transcript_fast(video_id):
     """Fast method: use youtube-transcript-api library with cookies + Tor."""
     last_error = "unknown error"
 
-    # Try multiple Tor IPs (rotate between attempts), then direct
-    tor_attempts = 5 if is_tor_running() else 0
+    # Try multiple Tor IPs only (never expose server IP to YouTube)
+    tor_attempts = 7 if is_tor_running() else 0
 
-    for attempt in range(tor_attempts + 1):
-        use_tor = attempt < tor_attempts
+    for attempt in range(max(tor_attempts, 1)):
+        use_tor = is_tor_running()
         try:
             api, session = _get_transcript_api(use_tor=use_tor)
             proxy_label = f"tor-{attempt+1}" if use_tor else "direct"
