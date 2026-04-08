@@ -551,6 +551,40 @@ def create_app():
 
     app = Flask(__name__)
 
+    @app.route('/debug', methods=['GET'])
+    def debug():
+        """Debug endpoint to test fast transcript method."""
+        info = {"cookie_file": COOKIE_FILE, "cookie_exists": os.path.exists(COOKIE_FILE)}
+        if os.path.exists(COOKIE_FILE):
+            info["cookie_size"] = os.path.getsize(COOKIE_FILE)
+
+        # Check youtube-transcript-api
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi
+            info["yt_transcript_api"] = "installed"
+        except ImportError as e:
+            info["yt_transcript_api"] = f"NOT installed: {e}"
+            return jsonify(info)
+
+        # Try loading cookies
+        try:
+            import requests as req_lib
+            session = req_lib.Session()
+            _load_cookies_to_session(session)
+            info["cookies_loaded"] = len(session.cookies)
+        except Exception as e:
+            info["cookies_error"] = str(e)
+
+        # Try fetching transcript
+        try:
+            api = _get_transcript_api()
+            t = api.fetch('dQw4w9WgXcQ', languages=['en'])
+            info["test_result"] = f"OK - {len(t.snippets)} lines"
+        except Exception as e:
+            info["test_error"] = str(e)[:500]
+
+        return jsonify(info)
+
     @app.route('/health', methods=['GET'])
     def health():
         import requests as req_lib
