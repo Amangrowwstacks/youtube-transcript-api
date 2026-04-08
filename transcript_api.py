@@ -341,51 +341,61 @@ def get_video_id(url):
     return None
 
 
+def _can_impersonate():
+    """Check if curl_cffi is available for --impersonate."""
+    try:
+        import curl_cffi
+        return True
+    except ImportError:
+        return False
+
+
 def get_subtitle_urls(video_id, url):
     """Use yt-dlp to get signed subtitle URLs."""
-    cmd = ['yt-dlp', '--dump-json', '-f', 'sb0', '--no-warnings']
+    base_cmd = [sys.executable, '-m', 'yt_dlp', '--dump-json', '--skip-download', '--no-warnings']
     if os.path.exists(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 100:
-        cmd += ['--cookies', COOKIE_FILE]
-    try:
-        cmd += ['--impersonate', 'chrome']
-    except Exception:
-        pass
+        base_cmd += ['--cookies', COOKIE_FILE]
 
-    # Try with proxy first, then without
+    # Try with and without --impersonate
+    impersonate_opts = []
+    if _can_impersonate():
+        impersonate_opts.append(['--impersonate', 'chrome'])
+    impersonate_opts.append([])  # without impersonate
+
+    # Try with and without proxy
     proxy_opts = []
     if is_tor_running():
         proxy_opts.append(['--proxy', 'socks5://127.0.0.1:9050'])
-    proxy_opts.append([])  # no proxy fallback
+    proxy_opts.append([])  # direct
 
-    for proxy in proxy_opts:
-        full_cmd = cmd + proxy + [url]
-        try:
+    for imp in impersonate_opts:
+        for proxy in proxy_opts:
+            full_cmd = base_cmd + imp + proxy + [url]
             try:
-                result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=30)
-            except FileNotFoundError:
-                full_cmd[0:1] = [sys.executable, '-m', 'yt_dlp']
-                result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=30)
+                result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=45)
 
-            if result.returncode != 0:
-                print(f"[YT-DLP] Failed (proxy={bool(proxy)}): {result.stderr[:200]}")
+                if result.returncode != 0:
+                    print(f"[YT-DLP] Failed (impersonate={bool(imp)}, proxy={bool(proxy)}): {result.stderr[:300]}")
+                    continue
+
+                data = json.loads(result.stdout)
+                auto_subs = data.get('automatic_captions', {})
+                manual_subs = data.get('subtitles', {})
+
+                urls = []
+                for subs_dict in [manual_subs, auto_subs]:
+                    for lang in ['hi', 'en']:
+                        if lang in subs_dict:
+                            for fmt in subs_dict[lang]:
+                                if fmt['ext'] == 'json3':
+                                    urls.append((fmt['url'], lang))
+                                    break
+                if urls:
+                    print(f"[YT-DLP] Success (impersonate={bool(imp)}, proxy={bool(proxy)}): {len(urls)} subtitle URLs")
+                    return urls
+            except Exception as e:
+                print(f"[YT-DLP] Exception: {e}")
                 continue
-
-            data = json.loads(result.stdout)
-            auto_subs = data.get('automatic_captions', {})
-            manual_subs = data.get('subtitles', {})
-
-            urls = []
-            for subs_dict in [manual_subs, auto_subs]:
-                for lang in ['hi', 'en']:
-                    if lang in subs_dict:
-                        for fmt in subs_dict[lang]:
-                            if fmt['ext'] == 'json3':
-                                urls.append((fmt['url'], lang))
-                                break
-            if urls:
-                return urls
-        except Exception:
-            continue
     return []
 
 

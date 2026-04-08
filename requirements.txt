@@ -1,6 +1,6 @@
 flask
 requests
 PySocks
-yt-dlp
+yt-dlp[default]
 curl_cffi
 gunicorn
