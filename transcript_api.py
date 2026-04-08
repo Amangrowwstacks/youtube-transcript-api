@@ -286,11 +286,12 @@ def rotate_tor_ip():
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(5)
             s.connect(('127.0.0.1', 9051))
-            s.send(b'AUTHENTICATE ""\r\n')
-            resp = s.recv(256)
-            if b'250' not in resp:
-                s.send(b'AUTHENTICATE\r\n')
-                s.recv(256)
+            # Try different auth methods
+            for auth_cmd in [b'AUTHENTICATE ""\r\n', b'AUTHENTICATE\r\n', b'AUTHENTICATE "password"\r\n']:
+                s.send(auth_cmd)
+                resp = s.recv(256)
+                if b'250' in resp:
+                    break
             s.send(b'SIGNAL NEWNYM\r\n')
             resp = s.recv(256)
             if b'250' in resp:
@@ -405,7 +406,7 @@ def _load_cookies_to_session(session):
 def _save_cookies_from_session(session):
     """Merge updated cookies from session back into cookies.txt."""
     try:
-        if not session.cookies:
+        if not session or not session.cookies:
             return
 
         # Load existing cookies as dict (name -> full line)
@@ -443,16 +444,20 @@ def _save_cookies_from_session(session):
 
 
 def _get_transcript_api(use_tor=False):
-    """Get YouTubeTranscriptApi with cookies and optional Tor proxy."""
+    """Get YouTubeTranscriptApi with optional Tor proxy."""
     from youtube_transcript_api import YouTubeTranscriptApi
-    import requests as req_lib
+    from youtube_transcript_api.proxies import GenericProxyConfig
 
-    session = req_lib.Session()
-    _load_cookies_to_session(session)
     if use_tor and is_tor_running():
-        session.proxies = TOR_PROXIES
+        proxy = GenericProxyConfig(
+            http_url="socks5h://127.0.0.1:9050",
+            https_url="socks5h://127.0.0.1:9050"
+        )
+        api = YouTubeTranscriptApi(proxy_config=proxy)
+    else:
+        api = YouTubeTranscriptApi()
 
-    return YouTubeTranscriptApi(http_client=session), session
+    return api, None
 
 
 def fetch_transcript_fast(video_id):
