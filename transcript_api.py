@@ -413,19 +413,32 @@ def parse_json3(text):
     return lines
 
 
-def fetch_transcript_fast(video_id):
-    """Fast method: use youtube-transcript-api library directly."""
-    try:
-        from youtube_transcript_api import YouTubeTranscriptApi
-        api = YouTubeTranscriptApi()
+def _get_transcript_api():
+    """Get YouTubeTranscriptApi with cookies loaded."""
+    import http.cookiejar
+    from youtube_transcript_api import YouTubeTranscriptApi
+    import requests as req_lib
 
-        # Try preferred languages first
+    session = req_lib.Session()
+    if os.path.exists(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 100:
+        cj = http.cookiejar.MozillaCookieJar(COOKIE_FILE)
+        cj.load(ignore_discard=True, ignore_expires=True)
+        session.cookies = cj
+
+    return YouTubeTranscriptApi(http_client=session)
+
+
+def fetch_transcript_fast(video_id):
+    """Fast method: use youtube-transcript-api library with cookies."""
+    try:
+        api = _get_transcript_api()
+
+        # Try preferred languages first, then any available
         for langs in [['hi', 'en'], None]:
             try:
                 if langs:
                     t = api.fetch(video_id, languages=langs)
                 else:
-                    # Get any available transcript
                     tl = api.list(video_id)
                     t = None
                     for tr in tl:
@@ -439,7 +452,8 @@ def fetch_transcript_fast(video_id):
                     lang = t.language_code if hasattr(t, 'language_code') else 'unknown'
                     print(f"[FAST] Got {len(lines)} lines for {video_id} (lang={lang})")
                     return lines, lang, None
-            except Exception:
+            except Exception as e:
+                print(f"[FAST] Attempt (langs={langs}): {e}")
                 continue
     except Exception as e:
         print(f"[FAST] Failed for {video_id}: {e}")
