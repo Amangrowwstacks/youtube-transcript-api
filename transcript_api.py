@@ -424,6 +424,17 @@ def create_app():
 
     app = Flask(__name__)
 
+    @app.route('/', methods=['GET'])
+    def index():
+        return jsonify({
+            "service": "YouTube Transcript API",
+            "endpoints": {
+                "POST /transcript": {"body": {"url": "youtube_link"}},
+                "POST /transcript/bulk": {"body": {"urls": ["link1", "link2"]}},
+                "GET /health": "Check server and Tor status"
+            }
+        })
+
     @app.route('/health', methods=['GET'])
     def health():
         import requests as req_lib

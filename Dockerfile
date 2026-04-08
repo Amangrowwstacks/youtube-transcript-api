@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 # Install Tor
-RUN apt-get update && apt-get install -y tor curl && \
+RUN apt-get update && apt-get install -y tor curl netcat-openbsd && \
     rm -rf /var/lib/apt/lists/*
 
 # Configure Tor

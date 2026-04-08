@@ -9,7 +9,16 @@ EOF
 # Start Tor in background
 tor -f /etc/tor/torrc &
 echo "Waiting for Tor to start..."
-sleep 5
 
-# Start API server
+# Wait up to 15 seconds for Tor
+for i in $(seq 1 15); do
+    if nc -z 127.0.0.1 9050 2>/dev/null; then
+        echo "Tor started successfully!"
+        break
+    fi
+    echo "Waiting for Tor... ($i/15)"
+    sleep 1
+done
+
+# Start API server (even if Tor failed, so Railway doesn't mark deploy as crashed)
 exec python transcript_api.py
