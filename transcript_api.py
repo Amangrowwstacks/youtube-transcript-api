@@ -474,11 +474,13 @@ def fetch_transcript_fast(video_id):
                     _save_cookies_from_session(session)
                     return lines, lang, None
             except Exception as e:
-                print(f"[FAST] Attempt (langs={langs}): {e}")
+                last_error = str(e)[:200]
+                print(f"[FAST] Attempt (langs={langs}): {last_error}")
                 continue
     except Exception as e:
-        print(f"[FAST] Failed for {video_id}: {e}")
-    return None, None, None
+        last_error = str(e)[:200]
+        print(f"[FAST] Failed for {video_id}: {last_error}")
+    return None, None, last_error if 'last_error' in dir() else "unknown error"
 
 
 def fetch_transcript_ytdlp(video_id, url):
@@ -534,14 +536,14 @@ def fetch_transcript(video_id, url):
             return lines_part[1].strip().split('\n'), lang, None
 
     # Method 1: Fast (youtube-transcript-api library)
-    lines, lang, _ = fetch_transcript_fast(video_id)
+    lines, lang, fast_error = fetch_transcript_fast(video_id)
 
     # Method 2: Fallback (yt-dlp)
     if lines is None:
         print(f"[FETCH] Fast method failed for {video_id}, trying yt-dlp...")
-        lines, lang, error = fetch_transcript_ytdlp(video_id, url)
+        lines, lang, ytdlp_error = fetch_transcript_ytdlp(video_id, url)
         if lines is None:
-            return None, None, error
+            return None, None, f"Fast: {fast_error} | YT-DLP: {ytdlp_error}"
 
     # Cache result
     with open(cache_file, 'w', encoding='utf-8') as f:
