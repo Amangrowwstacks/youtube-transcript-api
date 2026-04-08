@@ -436,51 +436,63 @@ def _save_cookies_from_session(session):
         print(f"[COOKIES] Save failed: {e}")
 
 
-def _get_transcript_api():
-    """Get YouTubeTranscriptApi with cookies loaded."""
+def _get_transcript_api(use_tor=False):
+    """Get YouTubeTranscriptApi with cookies and optional Tor proxy."""
     from youtube_transcript_api import YouTubeTranscriptApi
     import requests as req_lib
 
     session = req_lib.Session()
     _load_cookies_to_session(session)
+    if use_tor and is_tor_running():
+        session.proxies = TOR_PROXIES
 
     return YouTubeTranscriptApi(http_client=session), session
 
 
 def fetch_transcript_fast(video_id):
-    """Fast method: use youtube-transcript-api library with cookies."""
-    try:
-        api, session = _get_transcript_api()
+    """Fast method: use youtube-transcript-api library with cookies + Tor."""
+    last_error = "unknown error"
 
-        # Try preferred languages first, then any available
-        for langs in [['hi', 'en'], None]:
-            try:
-                if langs:
-                    t = api.fetch(video_id, languages=langs)
-                else:
-                    tl = api.list(video_id)
-                    t = None
-                    for tr in tl:
-                        t = tr.fetch()
-                        break
-                    if t is None:
-                        continue
+    # Try: 1) Tor+cookies, 2) direct+cookies, 3) Tor only, 4) direct only
+    tor_options = [True, False] if is_tor_running() else [False]
 
-                lines = [s.text.strip().replace('\n', ' ') for s in t.snippets if s.text.strip()]
-                if lines:
-                    lang = t.language_code if hasattr(t, 'language_code') else 'unknown'
-                    print(f"[FAST] Got {len(lines)} lines for {video_id} (lang={lang})")
-                    # Auto-refresh cookies after successful fetch
-                    _save_cookies_from_session(session)
-                    return lines, lang, None
-            except Exception as e:
-                last_error = str(e)[:200]
-                print(f"[FAST] Attempt (langs={langs}): {last_error}")
-                continue
-    except Exception as e:
-        last_error = str(e)[:200]
-        print(f"[FAST] Failed for {video_id}: {last_error}")
-    return None, None, last_error if 'last_error' in dir() else "unknown error"
+    for use_tor in tor_options:
+        try:
+            api, session = _get_transcript_api(use_tor=use_tor)
+            proxy_label = "tor" if use_tor else "direct"
+
+            for langs in [['hi', 'en'], None]:
+                try:
+                    if langs:
+                        t = api.fetch(video_id, languages=langs)
+                    else:
+                        tl = api.list(video_id)
+                        t = None
+                        for tr in tl:
+                            t = tr.fetch()
+                            break
+                        if t is None:
+                            continue
+
+                    lines = [s.text.strip().replace('\n', ' ') for s in t.snippets if s.text.strip()]
+                    if lines:
+                        lang = t.language_code if hasattr(t, 'language_code') else 'unknown'
+                        print(f"[FAST] Got {len(lines)} lines for {video_id} (lang={lang}, {proxy_label})")
+                        _save_cookies_from_session(session)
+                        return lines, lang, None
+                except Exception as e:
+                    last_error = str(e)[:200]
+                    print(f"[FAST] Attempt ({proxy_label}, langs={langs}): {last_error}")
+                    continue
+        except Exception as e:
+            last_error = str(e)[:200]
+            print(f"[FAST] Failed for {video_id} ({proxy_label}): {last_error}")
+
+        # Rotate Tor IP for next attempt
+        if use_tor:
+            rotate_tor_ip()
+
+    return None, None, last_error
 
 
 def fetch_transcript_ytdlp(video_id, url):
