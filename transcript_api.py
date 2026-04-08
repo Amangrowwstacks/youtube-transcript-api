@@ -42,7 +42,7 @@ HEADERS = {
 }
 
 request_count = 0
-REQUEST_LIMIT = 8
+REQUEST_LIMIT = 5  # Rotate Tor IP every 5 requests to avoid blocks
 
 # ============================================================
 #  AUTO SETUP - runs once on first launch
@@ -289,7 +289,7 @@ def rotate_tor_ip():
             resp = s.recv(256)
             if b'250' in resp:
                 request_count = 0
-                time.sleep(3)
+                time.sleep(1)
                 return True
     except Exception:
         pass
@@ -454,7 +454,7 @@ def fetch_transcript_fast(video_id):
     last_error = "unknown error"
 
     # Try multiple Tor IPs (rotate between attempts), then direct
-    tor_attempts = 3 if is_tor_running() else 0
+    tor_attempts = 5 if is_tor_running() else 0
 
     for attempt in range(tor_attempts + 1):
         use_tor = attempt < tor_attempts
