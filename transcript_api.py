@@ -397,20 +397,41 @@ def _load_cookies_to_session(session):
 
 
 def _save_cookies_from_session(session):
-    """Save updated cookies from session back to cookies.txt."""
+    """Merge updated cookies from session back into cookies.txt."""
     try:
         if not session.cookies:
             return
-        output = '# Netscape HTTP Cookie File\n'
+
+        # Load existing cookies as dict (name -> full line)
+        existing = {}
+        if os.path.exists(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 100:
+            with open(COOKIE_FILE, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    parts = line.split('\t')
+                    if len(parts) >= 7:
+                        existing[parts[5]] = line  # key by cookie name
+
+        # Update with new cookies from session
+        updated = 0
         for cookie in session.cookies:
             secure = 'TRUE' if cookie.secure else 'FALSE'
             domain_dot = 'TRUE' if cookie.domain.startswith('.') else 'FALSE'
             expires = str(cookie.expires) if cookie.expires else str(int(time.time()) + 86400 * 365)
-            output += f'{cookie.domain}\t{domain_dot}\t{cookie.path}\t{secure}\t{expires}\t{cookie.name}\t{cookie.value}\n'
-        if len(output) > 100:
-            with open(COOKIE_FILE, 'w') as f:
-                f.write(output)
-            print(f"[COOKIES] Auto-saved {len(session.cookies)} cookies (refreshed)")
+            new_line = f'{cookie.domain}\t{domain_dot}\t{cookie.path}\t{secure}\t{expires}\t{cookie.name}\t{cookie.value}'
+            if cookie.name not in existing or existing[cookie.name] != new_line:
+                existing[cookie.name] = new_line
+                updated += 1
+
+        # Write merged cookies
+        output = '# Netscape HTTP Cookie File\n'
+        output += '\n'.join(existing.values()) + '\n'
+        with open(COOKIE_FILE, 'w') as f:
+            f.write(output)
+        if updated:
+            print(f"[COOKIES] Merged {updated} updated cookies (total: {len(existing)})")
     except Exception as e:
         print(f"[COOKIES] Save failed: {e}")
 
