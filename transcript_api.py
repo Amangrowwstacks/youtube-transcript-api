@@ -424,17 +424,6 @@ def create_app():
 
     app = Flask(__name__)
 
-    @app.route('/', methods=['GET'])
-    def index():
-        return jsonify({
-            "service": "YouTube Transcript API",
-            "endpoints": {
-                "POST /transcript": {"body": {"url": "youtube_link"}},
-                "POST /transcript/bulk": {"body": {"urls": ["link1", "link2"]}},
-                "GET /health": "Check server and Tor status"
-            }
-        })
-
     @app.route('/health', methods=['GET'])
     def health():
         import requests as req_lib
@@ -527,11 +516,10 @@ def create_app():
 #  MAIN
 # ============================================================
 
-# Setup and create app (needed for gunicorn: gunicorn transcript_api:app)
-run_setup()
-app = create_app()
-
 if __name__ == "__main__":
+    # Auto setup on first run
+    run_setup()
+
     # Get server IP
     ip = "localhost"
     try:
@@ -555,4 +543,5 @@ if __name__ == "__main__":
     print("=" * 50)
     print()
 
+    app = create_app()
     app.run(host='0.0.0.0', port=PORT, debug=False)

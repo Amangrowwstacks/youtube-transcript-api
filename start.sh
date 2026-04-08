@@ -9,16 +9,7 @@ EOF
 # Start Tor in background
 tor -f /etc/tor/torrc &
 echo "Waiting for Tor to start..."
+sleep 5
 
-# Wait up to 15 seconds for Tor
-for i in $(seq 1 15); do
-    if nc -z 127.0.0.1 9050 2>/dev/null; then
-        echo "Tor started successfully!"
-        break
-    fi
-    echo "Waiting for Tor... ($i/15)"
-    sleep 1
-done
-
-# Start API server with gunicorn (production WSGI server)
-exec gunicorn transcript_api:app --bind 0.0.0.0:${PORT:-5055} --workers 4 --timeout 120
+# Start API server
+exec python transcript_api.py
