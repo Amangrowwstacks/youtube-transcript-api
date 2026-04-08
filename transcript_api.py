@@ -413,17 +413,29 @@ def parse_json3(text):
     return lines
 
 
+def _load_cookies_to_session(session):
+    """Parse Netscape cookies.txt and load into requests session."""
+    if not os.path.exists(COOKIE_FILE) or os.path.getsize(COOKIE_FILE) < 100:
+        return
+    with open(COOKIE_FILE, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts = line.split('\t')
+            if len(parts) >= 7:
+                domain, _, path, secure, _, name, value = parts[:7]
+                session.cookies.set(name, value, domain=domain, path=path)
+    print(f"[COOKIES] Loaded {len(session.cookies)} cookies into session")
+
+
 def _get_transcript_api():
     """Get YouTubeTranscriptApi with cookies loaded."""
-    import http.cookiejar
     from youtube_transcript_api import YouTubeTranscriptApi
     import requests as req_lib
 
     session = req_lib.Session()
-    if os.path.exists(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 100:
-        cj = http.cookiejar.MozillaCookieJar(COOKIE_FILE)
-        cj.load(ignore_discard=True, ignore_expires=True)
-        session.cookies = cj
+    _load_cookies_to_session(session)
 
     return YouTubeTranscriptApi(http_client=session)
 
