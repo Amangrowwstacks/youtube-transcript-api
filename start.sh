@@ -20,5 +20,5 @@ for i in $(seq 1 15); do
     sleep 1
 done
 
-# Start API server (even if Tor failed, so Railway doesn't mark deploy as crashed)
-exec python transcript_api.py
+# Start API server with gunicorn (production WSGI server)
+exec gunicorn transcript_api:app --bind 0.0.0.0:${PORT:-5055} --workers 4 --timeout 120

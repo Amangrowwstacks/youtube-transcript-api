@@ -527,10 +527,11 @@ def create_app():
 #  MAIN
 # ============================================================
 
-if __name__ == "__main__":
-    # Auto setup on first run
-    run_setup()
+# Setup and create app (needed for gunicorn: gunicorn transcript_api:app)
+run_setup()
+app = create_app()
 
+if __name__ == "__main__":
     # Get server IP
     ip = "localhost"
     try:
@@ -554,5 +555,4 @@ if __name__ == "__main__":
     print("=" * 50)
     print()
 
-    app = create_app()
     app.run(host='0.0.0.0', port=PORT, debug=False)
